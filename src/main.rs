@@ -88,6 +88,7 @@ enum Kind {
     Beam,
     Wall,
     RedAlert,
+    Matrix,
 }
 
 struct Item {
@@ -125,6 +126,8 @@ fn main() {
             println!("  and starts `astro --wall`, which draws it again every hour.");
             println!("  Red alert is the file ~/.drain/red-alert: `drain --tally` sees the");
             println!("  battery fall to 10 % and 5 %, and herald shows a pulsing red alert.");
+            println!("  Matrix decode is the file ~/.deck/matrix: deck's new answers come up");
+            println!("  as green glyphs that settle into the text.");
             return;
         }
         _ => {}
@@ -161,6 +164,14 @@ fn main() {
             about: "a pulsing red alert when the battery falls to 10 % and 5 %".into(),
             on: home.join(".drain/red-alert").exists(),
             kind: Kind::RedAlert,
+        });
+    }
+    if on_path("deck") {
+        items.push(Item {
+            name: "Matrix decode".into(),
+            about: "deck's answers arrive as green glyphs that settle into the text".into(),
+            on: home.join(".deck/matrix").exists(),
+            kind: Kind::Matrix,
         });
     }
     let mut fx = Fx { items, sel: 0, look: Look::load(&home), home };
@@ -261,15 +272,17 @@ impl Fx {
                 // drain reads the file only when the battery reaches a mark.
                 // Starting the tally is free when it already runs: the
                 // second one finds the first and ends.
-                let flag = self.home.join(".drain/red-alert");
-                let done = if on {
-                    let _ = fs::create_dir_all(self.home.join(".drain"));
+                if on {
                     detached(&["drain", "--tally"]);
-                    fs::write(&flag, "").is_ok()
-                } else {
-                    fs::remove_file(&flag).is_ok()
-                };
-                if done {
+                }
+                if flag(&self.home.join(".drain/red-alert"), on) {
+                    self.items[self.sel].on = on;
+                }
+                false
+            }
+            Kind::Matrix => {
+                // deck looks for the file at each new answer.
+                if flag(&self.home.join(".deck/matrix"), on) {
                     self.items[self.sel].on = on;
                 }
                 false
@@ -389,6 +402,15 @@ fn beam_ms(rc: &str) -> u32 {
 /// Where `astro --wall` keeps its picture.
 fn wall_file(home: &Path) -> PathBuf {
     home.join(".astro/wall.bgrx")
+}
+
+/// Make or remove an empty file that switches an effect. True when done.
+fn flag(path: &Path, on: bool) -> bool {
+    if on {
+        path.parent().is_some_and(|d| fs::create_dir_all(d).is_ok()) && fs::write(path, "").is_ok()
+    } else {
+        fs::remove_file(path).is_ok()
+    }
 }
 
 /// Whether a program by this name is on the PATH.
