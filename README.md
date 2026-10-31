@@ -29,6 +29,7 @@ From a key binding it opens its own [glass](https://github.com/isene/glass) wind
 - **Views**, from the [views](https://github.com/isene/fe2o3#views) tool. A view dresses strip, herald, launch and tile at once, so only one is on at a time. A new file in `views/` shows up here by itself.
 - **Beam-in**, when the desktop runs on [frame](https://github.com/isene/frame). A new window arrives in sparkles, like a transporter. fx sets `beam = 600` (or `0`) in `~/.framerc` and tells frame to read it again.
 - **Living wallpaper**, when frame runs and [astro](https://github.com/isene/astro) is installed. The sky over you now, the Moon in its phase and the Yr forecast, drawn again every hour. fx points frame's `background` at astro's picture and starts `astro --wall`; off points it back at `~/.framebg`.
+- **Red alert**, when [drain](https://github.com/isene/drain) is installed. When the battery falls to 10 %, and again at 5 %, [herald](https://github.com/isene/herald) shows a pulsing red alert with the minutes left; it goes when the charger goes in. fx makes or removes `~/.drain/red-alert` and starts `drain --tally`, which already follows the battery.
 
 ## Speed
 

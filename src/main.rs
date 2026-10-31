@@ -87,6 +87,7 @@ enum Kind {
     View(String),
     Beam,
     Wall,
+    RedAlert,
 }
 
 struct Item {
@@ -122,6 +123,8 @@ fn main() {
             println!("  Beam-in is frame's `beam` key in ~/.framerc ({BEAM_MS} ms when on).");
             println!("  Living wallpaper points frame's `background` at astro's picture,");
             println!("  and starts `astro --wall`, which draws it again every hour.");
+            println!("  Red alert is the file ~/.drain/red-alert: `drain --tally` sees the");
+            println!("  battery fall to 10 % and 5 %, and herald shows a pulsing red alert.");
             return;
         }
         _ => {}
@@ -151,6 +154,14 @@ fn main() {
                 kind: Kind::Wall,
             });
         }
+    }
+    if on_path("drain") {
+        items.push(Item {
+            name: "Red alert".into(),
+            about: "a pulsing red alert when the battery falls to 10 % and 5 %".into(),
+            on: home.join(".drain/red-alert").exists(),
+            kind: Kind::RedAlert,
+        });
     }
     let mut fx = Fx { items, sel: 0, look: Look::load(&home), home };
 
@@ -244,6 +255,23 @@ impl Fx {
                     }
                 }
                 self.items[self.sel].on = on;
+                false
+            }
+            Kind::RedAlert => {
+                // drain reads the file only when the battery reaches a mark.
+                // Starting the tally is free when it already runs: the
+                // second one finds the first and ends.
+                let flag = self.home.join(".drain/red-alert");
+                let done = if on {
+                    let _ = fs::create_dir_all(self.home.join(".drain"));
+                    detached(&["drain", "--tally"]);
+                    fs::write(&flag, "").is_ok()
+                } else {
+                    fs::remove_file(&flag).is_ok()
+                };
+                if done {
+                    self.items[self.sel].on = on;
+                }
                 false
             }
         }
