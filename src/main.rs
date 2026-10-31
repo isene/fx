@@ -300,8 +300,7 @@ impl Fx {
         }
         if let Some(c) = look.side {
             for y in 2..rows {
-                let edge = if y == 2 { "  " } else { " " };
-                out.push_str(&format!("{}{}", Cursor::at(1, y as u16), style::rgb(edge, None, Some(c), "")));
+                out.push_str(&format!("{}{}", Cursor::at(1, y as u16), style::rgb(" ", None, Some(c), "")));
             }
         }
         let tail = "   views and effects";
