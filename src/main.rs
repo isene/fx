@@ -2,7 +2,7 @@
 //!
 //! A view (from the `views` tool) dresses strip, herald, launch and tile
 //! at once, and only one is on at a time. An effect is one trick, such
-//! as frame's beam-in. Space or Enter switches the one under the cursor,
+//! as frame's beam-in or astro's living wallpaper. Space or Enter switches the one under the cursor,
 //! and it takes effect at once.
 //!
 //! Run from a key binding, with no terminal around it, fx opens its own
@@ -86,6 +86,7 @@ fn hex(v: &str) -> Option<Rgb> {
 enum Kind {
     View(String),
     Beam,
+    Wall,
 }
 
 struct Item {
@@ -119,6 +120,8 @@ fn main() {
             println!();
             println!("  Views come from the views tool; one is on at a time.");
             println!("  Beam-in is frame's `beam` key in ~/.framerc ({BEAM_MS} ms when on).");
+            println!("  Living wallpaper points frame's `background` at astro's picture,");
+            println!("  and starts `astro --wall`, which draws it again every hour.");
             return;
         }
         _ => {}
@@ -140,6 +143,14 @@ fn main() {
             on: beam_ms(&rc) > 0,
             kind: Kind::Beam,
         });
+        if on_path("astro") {
+            items.push(Item {
+                name: "Living wallpaper".into(),
+                about: "the sky, the Moon and the Yr forecast, drawn again every hour".into(),
+                on: frame_key(&rc, "background").as_deref() == Some(wall_file(&home).to_str().unwrap_or("")),
+                kind: Kind::Wall,
+            });
+        }
     }
     let mut fx = Fx { items, sel: 0, look: Look::load(&home), home };
 
@@ -198,13 +209,41 @@ impl Fx {
             Kind::Beam => {
                 let path = self.home.join(".framerc");
                 let rc = fs::read_to_string(&path).unwrap_or_default();
-                if fs::write(&path, set_beam(&rc, if on { BEAM_MS } else { 0 })).is_ok() {
+                if fs::write(&path, set_key(&rc, "beam", &(if on { BEAM_MS } else { 0 }).to_string())).is_ok() {
                     if let Some(pid) = frame_pid() {
                         // SAFETY: a plain signal; frame re-reads ~/.framerc on it.
                         unsafe { libc::kill(pid, libc::SIGUSR2) };
                     }
                     self.items[self.sel].on = on;
                 }
+                false
+            }
+            Kind::Wall => {
+                // On: frame's background is astro's picture, and astro draws
+                // it, tells frame, and draws it again each hour. Off: back to
+                // chasm-bg's picture, and astro, woken, sees that and ends.
+                let path = self.home.join(".framerc");
+                let rc = fs::read_to_string(&path).unwrap_or_default();
+                let file = if on { wall_file(&self.home) } else { self.home.join(".framebg") };
+                if fs::write(&path, set_key(&rc, "background", &file.to_string_lossy())).is_err() {
+                    return false;
+                }
+                if on {
+                    detached(&["astro", "--wall"]);
+                } else {
+                    if let Some(pid) = frame_pid() {
+                        // SAFETY: a plain signal; frame re-reads ~/.framerc on it.
+                        unsafe { libc::kill(pid, libc::SIGUSR2) };
+                    }
+                    let drawer = runtime_dir().join("astro-wall.pid");
+                    if let Some(pid) = fs::read_to_string(drawer).ok().and_then(|s| s.trim().parse::<i32>().ok()) {
+                        if fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim() == "astro") {
+                            // SAFETY: a plain signal to a process we just checked is astro.
+                            unsafe { libc::kill(pid, libc::SIGUSR1) };
+                        }
+                    }
+                }
+                self.items[self.sel].on = on;
                 false
             }
         }
@@ -304,33 +343,44 @@ fn parse_views(text: &str) -> Vec<Item> {
         .collect()
 }
 
-/// frame's `beam` in ~/.framerc; the last line counts, as in frame.
-fn beam_ms(rc: &str) -> u32 {
+/// The value of `key` in ~/.framerc; the last line counts, as in frame.
+fn frame_key(rc: &str, key: &str) -> Option<String> {
     rc.lines()
         .filter_map(|l| {
             let (k, v) = l.split('#').next()?.split_once('=')?;
-            if k.trim() == "beam" {
-                v.trim().parse().ok()
-            } else {
-                None
-            }
+            (k.trim() == key).then(|| v.trim().to_string())
         })
         .last()
-        .unwrap_or(0)
 }
 
-/// ~/.framerc with every beam line set to `ms`, comments kept; a line
+/// frame's `beam` in ms, 0 when off or missing.
+fn beam_ms(rc: &str) -> u32 {
+    frame_key(rc, "beam").and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// Where `astro --wall` keeps its picture.
+fn wall_file(home: &Path) -> PathBuf {
+    home.join(".astro/wall.bgrx")
+}
+
+/// Whether a program by this name is on the PATH.
+fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
+}
+
+/// ~/.framerc with every `key` line set to `value`, comments kept; a line
 /// is added when there is none.
-fn set_beam(rc: &str, ms: u32) -> String {
+fn set_key(rc: &str, key: &str, value: &str) -> String {
     let mut out = String::new();
     let mut found = false;
     for line in rc.lines() {
-        let key = line.split('#').next().unwrap_or("").split_once('=').map(|(k, _)| k.trim());
-        if key == Some("beam") {
+        let k = line.split('#').next().unwrap_or("").split_once('=').map(|(k, _)| k.trim());
+        if k == Some(key) {
             found = true;
-            let value = format!("beam = {ms}");
+            let value = format!("{key} = {value}");
             match line.find('#') {
-                Some(i) => out.push_str(&format!("{value:<27}{}", &line[i..])),
+                // The comment keeps its column, a space after a long value.
+                Some(i) => out.push_str(&format!("{value:<w$}{}", &line[i..], w = 27.max(value.len() + 1))),
                 None => out.push_str(&value),
             }
         } else {
@@ -339,7 +389,7 @@ fn set_beam(rc: &str, ms: u32) -> String {
         out.push('\n');
     }
     if !found {
-        out.push_str(&format!("beam = {ms}\n"));
+        out.push_str(&format!("{key} = {value}\n"));
     }
     out
 }
@@ -416,8 +466,14 @@ mod tests {
     }
 
     #[test]
-    fn set_beam_keeps_comments_and_adds_a_missing_line() {
-        assert_eq!(set_beam("keymap = no\nbeam = 600  # ms (0 = off)\n", 0), "keymap = no\nbeam = 0                   # ms (0 = off)\n");
-        assert_eq!(set_beam("keymap = no\n", 600), "keymap = no\nbeam = 600\n");
+    fn set_key_keeps_comments_and_adds_a_missing_line() {
+        assert_eq!(set_key("keymap = no\nbeam = 600  # ms (0 = off)\n", "beam", "0"), "keymap = no\nbeam = 0                   # ms (0 = off)\n");
+        assert_eq!(set_key("keymap = no\n", "beam", "600"), "keymap = no\nbeam = 600\n");
+        let rc = "background = /h/.framebg\nbeam = 0\n";
+        let on = set_key(rc, "background", "/h/.astro/wall.bgrx");
+        assert_eq!(frame_key(&on, "background").as_deref(), Some("/h/.astro/wall.bgrx"));
+        let long = set_key("background = /h/.framebg  # the picture\n", "background", "/home/someone/.astro/wall.bgrx");
+        assert_eq!(long, "background = /home/someone/.astro/wall.bgrx # the picture\n", "a space before the comment");
+        assert_eq!(beam_ms(&on), 0, "the other keys stay");
     }
 }
