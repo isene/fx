@@ -345,8 +345,8 @@ impl Fx {
             None => (String::new(), w),
         };
         let foot = " arrows move · Space switch · Esc close";
-        let version = format!("v{} ", env!("CARGO_PKG_VERSION"));
-        let pad = fw.saturating_sub(crust::display_width(foot) + version.len());
+        let version = crust::version_tag("fx", env!("CARGO_PKG_VERSION"));
+        let pad = fw.saturating_sub(crust::display_width(foot) + crust::display_width(&version));
         out.push_str(&format!(
             "{}{lead}{}",
             Cursor::at(1, rows as u16),
